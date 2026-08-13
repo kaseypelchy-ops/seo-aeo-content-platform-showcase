@@ -63,7 +63,7 @@ That makes the content system data-driven instead of requiring every SEO field t
 A page request might look like:
 
 ```text
-/national/pennsylvania/example-fiber/
+/national/{state}/{town}/
 ```
 
 The plugin resolves the current path and requests the matching record from Supabase.
@@ -182,7 +182,7 @@ Conceptually:
 
 ```text
 WordPress Request
-/national/pennsylvania/example-fiber/
+/national/{state}/{town}/
               ↓
 Normalize Path
               ↓
@@ -376,26 +376,69 @@ This repository includes sanitized examples based on the production architecture
 
 A reduced version of the reusable local-town template showing:
 
-- ACF / WordPress custom-field support
-- Dynamic `{town}` and `{state}` values
+- ACF with native WordPress custom-field fallback
+- Dynamic `{town}`, `{state}`, and `{state_code}` values
 - Supabase SEO/AEO overrides
 - Dynamic fallback content
+- Technology-aware page data
 - Structured FAQ handling
-- SEO metadata
+- Server-rendered SEO metadata
 - JSON-LD generation
 - WordPress sanitization and escaping
+
+The production template is substantially larger and includes additional service logic, market-specific behavior, lead handling, styling, and internal integrations that are intentionally not included in the public repository.
 
 ### Example Supabase Page Record
 
 [`examples/sample-page-record.json`](examples/sample-page-record.json)
 
-Shows the type of structured page record used by the content platform with public-safe placeholders such as:
+Shows the type of structured page record used by the content platform with public-safe parameters such as:
 
 ```text
 {town}
 {state}
 {state_code}
 {technology}
+```
+
+A record can conceptually provide:
+
+```text
+Path
+Locality
+State
+Technology
+SEO Title
+H1
+Meta Description
+Canonical URL
+Robots Settings
+Structured FAQs
+```
+
+### Example API Response
+
+[`examples/sample-api-response.json`](examples/sample-api-response.json)
+
+Shows the same type of structured SEO/AEO record in the response shape received by the WordPress integration layer.
+
+### Example Data Flow
+
+```text
+Supabase Page Record
+        ↓
+REST API Response
+        ↓
+SEO / AEO WordPress Plugin
+        ↓
+Reusable Local Town Template
+        ↓
+SEO Metadata + H1 + FAQs + JSON-LD
+        ↓
+Localized Server-Rendered Page
+```
+
+> All example records are synthetic and use placeholders. Production URLs, credentials, market records, pricing logic, lead-routing logic, internal integrations, and proprietary business rules have been removed.
 
 ---
 
