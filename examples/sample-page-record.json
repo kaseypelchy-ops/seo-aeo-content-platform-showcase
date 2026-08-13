@@ -1,18 +1,27 @@
 {
-  "path": "/national/{state}/{town}-fiber/",
-  "technology": "fiber",
-  "seo_title": "Fiber Internet in {town}, {state}",
-  "meta_description": "Explore high-speed internet service in {town}, {state}.",
-  "h1": "High-Speed Fiber Internet in {town}, {state}",
-  "intro": "Reliable internet service is available to qualifying addresses in the {town} area.",
+  "path": "/national/{state}/{town}/",
+  "locality_name": "{town}",
+  "state_name": "{state}",
+  "state_code": "{state_code}",
+  "technology": "{technology}",
+  "seo_title": "High-Speed Internet in {town}, {state_code} | Provider",
+  "h1": "High-Speed Internet in {town}, {state}",
+  "meta_description": "Explore internet service options available in {town}, {state}. Availability and technology can vary by exact service address.",
+  "canonical_url": "https://www.example.com/national/{state}/{town}/",
+  "robots_index": true,
+  "robots_follow": true,
   "faqs": [
     {
-      "question": "Is fiber internet available in {town}?",
-      "answer": "Availability depends on the exact service address."
+      "question": "Is internet service available in {town}, {state_code}?",
+      "short_answer": "Service is available in select areas. Availability should be confirmed using the exact service address.",
+      "detailed_answer": "Service availability, technology, speeds, and plan options can vary by location within {town}. The exact service address is used to determine what is available.",
+      "include_on_page": true
     },
     {
-      "question": "How do I check whether my home qualifies?",
-      "answer": "Use the availability tool to confirm service at your address."
+      "question": "What internet technology is available in {town}?",
+      "short_answer": "The page record identifies the technology available for the market.",
+      "detailed_answer": "The structured SEO/AEO record carries a technology value such as fiber, coax, or a combined service classification. The reusable template uses that data when building page content and structured data.",
+      "include_on_page": true
     }
   ]
 }
