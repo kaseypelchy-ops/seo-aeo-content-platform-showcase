@@ -1,0 +1,14 @@
+[
+  {
+    "path": "/national/{state}/{town}-fiber/",
+    "technology": "fiber",
+    "seo_title": "Fiber Internet in {town}, {state}",
+    "h1": "High-Speed Fiber Internet in {town}, {state}",
+    "faqs": [
+      {
+        "question": "Is fiber internet available in {town}?",
+        "answer": "Availability depends on the exact service address."
+      }
+    ]
+  }
+]
