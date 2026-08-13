@@ -1,0 +1,18 @@
+{
+  "path": "/national/{state}/{town}-fiber/",
+  "technology": "fiber",
+  "seo_title": "Fiber Internet in {town}, {state}",
+  "meta_description": "Explore high-speed internet service in {town}, {state}.",
+  "h1": "High-Speed Fiber Internet in {town}, {state}",
+  "intro": "Reliable internet service is available to qualifying addresses in the {town} area.",
+  "faqs": [
+    {
+      "question": "Is fiber internet available in {town}?",
+      "answer": "Availability depends on the exact service address."
+    },
+    {
+      "question": "How do I check whether my home qualifies?",
+      "answer": "Use the availability tool to confirm service at your address."
+    }
+  ]
+}
