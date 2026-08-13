@@ -1,10 +1,10 @@
-# High-Speed Fiber Internet in Example, Pennsylvania
+# High-Speed Fiber Internet in {town}, {state}
 
-Reliable internet service is available to qualifying addresses in the Example area.
+Reliable internet service is available to qualifying addresses in the {town} area.
 
 ## Frequently Asked Questions
 
-### Is fiber internet available in Example?
+### Is fiber internet available in {town}?
 
 Availability depends on the exact service address.
 
