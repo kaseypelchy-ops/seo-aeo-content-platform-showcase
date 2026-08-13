@@ -366,6 +366,39 @@ The project includes work across:
 
 ---
 
+## Examples
+
+This repository includes sanitized examples based on the production architecture.
+
+### Simplified WordPress Template
+
+[`examples/simplified-local-town-template.php`](examples/simplified-local-town-template.php)
+
+A reduced version of the reusable local-town template showing:
+
+- ACF / WordPress custom-field support
+- Dynamic `{town}` and `{state}` values
+- Supabase SEO/AEO overrides
+- Dynamic fallback content
+- Structured FAQ handling
+- SEO metadata
+- JSON-LD generation
+- WordPress sanitization and escaping
+
+### Example Supabase Page Record
+
+[`examples/sample-page-record.json`](examples/sample-page-record.json)
+
+Shows the type of structured page record used by the content platform with public-safe placeholders such as:
+
+```text
+{town}
+{state}
+{state_code}
+{technology}
+
+---
+
 ## My Role
 
 I designed and built the system around an existing WordPress website and localized page structure.
