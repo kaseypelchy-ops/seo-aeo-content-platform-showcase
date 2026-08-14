@@ -1,480 +1,647 @@
 # SEO & AEO Content Platform
 
-A database-driven SEO and Answer Engine Optimization platform built to manage localized website content through WordPress without manually maintaining every market page.
+A database-driven SEO and Answer Engine Optimization platform I built to manage hierarchical, localized website content through PostgreSQL, Supabase, and reusable WordPress templates.
 
-The system connects WordPress to structured content stored in Supabase. A custom WordPress plugin identifies the current page path, retrieves the matching SEO/AEO record, and makes that data available to the page and template layer.
+The system models website pages and their relationships in PostgreSQL, generates repeatable local SEO/AEO defaults, stores keywords, FAQs, content sections, internal links, services, markets, promotions, and redirects as structured data, assembles those records into page-level JSON documents, and makes the resulting content available to WordPress through a route-based API integration.
 
-This allows localized service pages to use consistent, structured content while keeping the underlying website template reusable.
+Instead of maintaining every localized page as a separate collection of hard-coded SEO fields and content blocks, the platform treats search content as structured application data.
 
-> Production source code, credentials, internal market data, and company-specific content rules are maintained privately. This repository documents the architecture and technical approach without exposing production systems.
+> The complete production implementation remains private because it contains production credentials, internal market information, company-specific content, private infrastructure configuration, and operational business rules. This repository contains sanitized examples based on the real architecture.
 
 ---
 
 ## Overview
 
-The project started with a common problem: localized website pages need different titles, headings, service information, FAQs, and other search-oriented content, but maintaining each page individually becomes difficult as the number of markets grows.
+Localized websites become difficult to manage when every town, state, service, promotion, FAQ, title, description, internal link, and structured-data element is maintained independently inside WordPress.
 
-Instead of building every page as a completely separate WordPress page, I built a system where the page structure stays reusable and the market-specific SEO/AEO content is stored as structured data.
+I built this platform to separate three responsibilities:
+
+```text
+PostgreSQL / Supabase
+        ↓
+Structured Content + Relationships
+        ↓
+WordPress Integration
+        ↓
+Reusable Presentation Layer
+```
+
+The database owns the structured content model. The WordPress integration resolves the requested path and retrieves the matching page bundle. The reusable template renders the final page, metadata, FAQs, content sections, and JSON-LD.
 
 At a high level:
 
 ```text
-Requested Website URL
+Visitor / Search Engine
+        ↓
+Requested URL
         ↓
 WordPress
         ↓
-Custom SEO / AEO Plugin
+Normalize Current Path
         ↓
-Resolve Current Path
+Supabase REST
         ↓
-Supabase Lookup
+Page Content View
         ↓
-Market-Specific Content
+Structured Page Bundle
         ↓
 Reusable WordPress Template
         ↓
-Localized Search-Optimized Page
+HTML + SEO Metadata + JSON-LD
 ```
 
 ---
 
-## What the Platform Does
+## What the Platform Manages
 
-The platform separates three concerns:
+The content model supports:
 
-### Page Structure
+- Website pages
+- Geographic markets
+- Services
+- Promotions
+- SEO keywords
+- FAQs
+- Content sections
+- Internal links
+- Redirects
+- Parent/child page relationships
+- Publishing status
+- Robots directives
+- Canonical URLs
+- Open Graph metadata
+- Answer-engine summaries
+- Key answers
+- Geographic scope
+- Locality information
+- Network technology
+- Content-generation state
+- Editorial SEO locking
 
-WordPress controls the page and template experience.
-
-### Content Data
-
-Supabase stores the structured SEO/AEO content associated with each route or market.
-
-### Retrieval Logic
-
-The custom plugin connects the requested WordPress path to the correct Supabase record.
-
-That makes the content system data-driven instead of requiring every SEO field to be manually embedded into page templates.
-
----
-
-## Example Request Flow
-
-A page request might look like:
-
-```text
-/national/{state}/{town}/
-```
-
-The plugin resolves the current path and requests the matching record from Supabase.
-
-Conceptually, the returned data can include values such as:
-
-```text
-Path
-Technology
-SEO Title
-Primary Heading
-Page-Level SEO / AEO Content
-```
-
-The exact production content model contains additional fields that are not included in this public showcase.
+This allows the system to treat SEO and AEO content as a connected content model rather than a set of unrelated WordPress fields.
 
 ---
 
-## High-Level Architecture
+## Technology
+
+- PHP
+- WordPress
+- PostgreSQL
+- PL/pgSQL
+- Supabase
+- REST APIs
+- SQL views
+- JSON / JSONB
+- WordPress custom fields / ACF
+- HTML
+- Schema.org / JSON-LD
+- SEO metadata
+- AEO content structures
+- Hierarchical content modeling
+
+---
+
+## Core Architecture
 
 ```mermaid
 flowchart TD
     A[Visitor / Search Engine] --> B[WordPress]
-    B --> C[Dynamic Page Template]
+    B --> C[Resolve Current Request Path]
+    C --> D[Supabase REST API]
 
-    B --> D[Custom SEO / AEO Plugin]
-    D --> E[Resolve Current URL Path]
-    E --> F[Supabase API]
+    D --> E[Page Content View]
 
-    F --> G[(SEO / AEO Content Database)]
-    G --> H[Matching Page Record]
+    F[(SEO Pages)] --> E
+    G[(Markets)] --> E
+    H[(Services)] --> E
+    I[(Promotions)] --> E
+    J[(Keywords)] --> E
+    K[(FAQs)] --> E
+    L[(Content Sections)] --> E
+    M[(Internal Links)] --> E
 
-    H --> D
-    D --> C
+    E --> N[Page-Level JSON Bundle]
+    N --> O[WordPress Integration]
+    O --> P[Reusable Template]
 
-    C --> I[Localized Page Output]
-    I --> J[Search Engines / Answer Engines / Visitors]
+    P --> Q[Page HTML]
+    P --> R[SEO Metadata]
+    P --> S[JSON-LD]
+    P --> T[Visible FAQs]
+    P --> U[Dynamic Content Sections]
 ```
 
----
-
-## Why I Built It
-
-Localized broadband pages need to reflect the specific market being served.
-
-Without a structured system, that can lead to:
-
-- Repetitive manual page creation
-- Inconsistent titles and headings
-- Content becoming difficult to update
-- Market data being duplicated across WordPress
-- Changes requiring edits across many individual pages
-- SEO content becoming tightly coupled to the page template
-
-The platform moves market-specific search content into a data layer and lets WordPress focus on presentation.
+The architecture deliberately separates normalized relational storage from the page-oriented document consumed by WordPress.
 
 ---
 
-## WordPress Integration
+## Hierarchical Page Model
 
-The WordPress side is handled through a custom plugin.
-
-Its core responsibility is to:
+The website structure is represented in the database rather than existing only as URL conventions.
 
 ```text
-Detect current page
-      ↓
-Determine page path
-      ↓
-Request matching content
-      ↓
-Validate response
-      ↓
-Expose content to WordPress
+Homepage
+   ↓
+National / Service-Area Landing Page
+   ↓
+State Page
+   ↓
+Local Market Page
 ```
 
-A simplified public example might look like:
+A page can include:
 
-```php
-function get_seo_page_data($path) {
-    // Request the matching page record
-    // from the configured content API.
-
-    return $page_data;
-}
+```text
+id
+page_name
+page_type
+slug
+path
+parent_page_id
+hierarchy_level
+geographic_scope
+state_code
+locality_name
+locality_type
+technology
 ```
 
-The production plugin contains additional handling and configuration that remain private.
+The self-referencing `parent_page_id` relationship allows pages to be connected into a navigable hierarchy. The application can understand that a local market belongs beneath a state page and that a state page belongs beneath a national service-area page.
 
 ---
 
-## Supabase Content Layer
+## Core Page Record
 
-Supabase acts as the structured content source.
+The main page record combines route identity, traditional SEO metadata, AEO content, publication state, hierarchy, and content governance.
 
-Conceptually:
+```text
+SEO Page
+│
+├── Route
+│   ├── page_name
+│   ├── page_type
+│   ├── slug
+│   └── path
+│
+├── SEO
+│   ├── seo_title
+│   ├── meta_description
+│   ├── primary_keyword
+│   ├── canonical_url
+│   ├── robots_index
+│   └── robots_follow
+│
+├── Page / AEO
+│   ├── h1
+│   ├── eyebrow
+│   ├── intro_content
+│   ├── answer_engine_summary
+│   └── key_answer
+│
+├── Social
+│   ├── og_title
+│   ├── og_description
+│   └── og_image_url
+│
+├── Publishing
+│   ├── status
+│   ├── published_at
+│   └── active
+│
+├── Hierarchy / Local Context
+│   ├── parent_page_id
+│   ├── hierarchy_level
+│   ├── geographic_scope
+│   ├── state_code
+│   ├── locality_name
+│   ├── locality_type
+│   └── technology
+│
+└── Governance
+    ├── seo_locked
+    └── content_generated_at
+```
+
+---
+
+## Relational Content Model
+
+Page content is normalized into related tables rather than stored as one large unstructured document.
+
+```text
+                         seo_pages
+                             │
+          ┌──────────────────┼───────────────────┐
+          │                  │                   │
+          ▼                  ▼                   ▼
+ seo_page_keywords     seo_page_faqs     seo_content_sections
+          │                  │                   │
+          └──────────────────┼───────────────────┘
+                             │
+                             ▼
+                    seo_internal_links
+```
+
+Pages can also reference markets, services, and promotions, while redirects are managed separately.
+
+This structure allows each content type to have its own validation, ordering, active state, and behavior.
+
+---
+
+## Page Content View
+
+WordPress does not need to reproduce the relational joins used by the database.
+
+A PostgreSQL view assembles the related records into one page-oriented document.
 
 ```text
 seo_pages
-├── path
-├── technology
-├── seo_title
-├── h1
-└── additional structured content
+    +
+seo_markets
+    +
+seo_services
+    +
+seo_promotions
+    +
+seo_page_keywords
+    +
+seo_page_faqs
+    +
+seo_content_sections
+    +
+seo_internal_links
+        ↓
+Page Content View
+        ↓
+One Structured JSON Response
 ```
 
-A page can therefore be resolved by its path instead of relying on hard-coded content inside the WordPress template.
+The view uses PostgreSQL JSONB functions including `jsonb_build_object()`, `jsonb_agg()`, and `COALESCE()` to create ordered arrays such as:
+
+```text
+keywords[]
+faqs[]
+content_sections[]
+internal_links[]
+```
+
+This gives the application a clean separation:
+
+```text
+PostgreSQL → Relational Model
+Page View  → Page Document
+WordPress  → Presentation
+```
+
+**[View the public SQL example →](examples/supabase-page-content-view.sql)**
 
 ---
 
-## Path-Based Content Resolution
+## Database-Side Local Content Generation
 
-The current website path becomes the lookup key.
-
-Conceptually:
+The platform can generate repeatable SEO/AEO defaults for local market pages.
 
 ```text
-WordPress Request
-/national/{state}/{town}/
-              ↓
-Normalize Path
-              ↓
-Supabase Query
-              ↓
-Matching Record
+Generate Local Content Bundle
+             ↓
+ ┌───────────┼────────────┬─────────────┐
+ ▼           ▼            ▼             ▼
+SEO       Keywords       FAQs        Sections
+Defaults
 ```
 
-This makes the system suitable for a large number of localized routes.
+Automatic generation validates that the target is the correct hierarchy level and geographic scope before applying local content rules.
+
+**[View the PL/pgSQL example →](examples/local-content-generator.sql)**
+
+---
+
+## Editorial Locking
+
+One of the important governance controls is `seo_locked`.
+
+```text
+Local Page
+    ↓
+seo_locked?
+ /         \
+Yes         No
+ ↓           ↓
+Preserve    Generate
+Curated     Defaults
+Content
+```
+
+Automatically generated defaults can therefore coexist with manually optimized pages. A curated page can be protected from bulk SEO regeneration without removing it from the broader content system.
 
 ---
 
 ## Technology-Aware Content
 
-The content model can distinguish between service technologies or page types.
-
-For example:
+Local content can change according to network or service technology.
 
 ```text
-Market
-    +
+Local Market
+     ↓
 Technology
-    ↓
-Appropriate Search Content
+ /      |       \
+Fiber  Coax   Fiber + Coax
+  ↓      ↓         ↓
+Technology-Specific
+SEO / AEO Content
 ```
 
-This allows the same underlying template architecture to support pages with different service characteristics without creating completely separate template systems.
+The generation layer can use technology to determine appropriate SEO titles, H1 content, keywords, FAQs, content sections, answer-engine summaries, and key answers.
+
+This allows one content architecture to support different local service conditions without creating a separate WordPress template for every technology combination.
 
 ---
 
-## Separation of Content and Presentation
+## Keyword Model
 
-One of the main design decisions was keeping the page template separate from the content source.
+Keywords are stored independently from the main page record and can include:
 
 ```text
-WordPress Template
-        ≠
-Market Content
+keyword
+keyword_type
+search_intent
+priority
+active
 ```
 
-Instead:
+This supports structured groups such as primary, secondary, long-tail, and question keywords, along with local, commercial, informational, and navigational search intent.
+
+---
+
+## FAQ / AEO Model
+
+FAQs are structured records with fields such as:
 
 ```text
-Reusable Template
-        +
-Structured Market Record
+question
+short_answer
+detailed_answer
+answer_type
+display_order
+include_on_page
+include_in_schema
+authoritative
+source_reference
+verified_at
+active
+```
+
+Visible page content and structured-data eligibility can therefore be controlled separately.
+
+```text
+FAQ
+ ├── include_on_page  → Visible HTML
+ └── include_in_schema → JSON-LD
+```
+
+---
+
+## Content Sections
+
+Page body content is modeled as ordered sections.
+
+```text
+section_key
+section_type
+heading
+subheading
+content
+display_order
+active
+```
+
+The reusable WordPress template can render these sections from structured data rather than requiring every section to be hard-coded into a separate PHP template.
+
+---
+
+## Internal Linking
+
+Internal links are stored as relationships rather than being embedded only inside page copy.
+
+A link can reference another SEO page or a direct URL and can include anchor text, relationship type, priority, and active state.
+
+```text
+National Page
+      ↓ child
+State Page
+      ↓ child
+Local Page
+      ↑ parent
+State Page
+```
+
+This makes internal linking part of the content architecture instead of an incidental template detail.
+
+---
+
+## Supabase REST Layer
+
+The page-content view is exposed through Supabase. The WordPress integration resolves the current request path and requests the matching active, published record.
+
+```text
+WordPress Request
         ↓
-Rendered Local Page
+/national/example-state/example-town/
+        ↓
+Normalize Path
+        ↓
+Supabase REST
+        ↓
+path = requested path
+active = true
+status = published
+        ↓
+Matching Page Bundle
 ```
 
-This makes the website easier to update and reduces duplicated content-management work.
+**[View the public PHP client →](examples/seo-content-client.php)**
 
 ---
 
-## Data-Driven Page Model
+## Safe Failure Behavior
 
-The system can be thought of as:
+The WordPress page does not depend entirely on a successful remote content lookup.
 
 ```text
-Route
-  ↓
-Structured Record
-  ↓
-Template
-  ↓
-Rendered Page
+Request Structured Page
+       ↓
+Successful?
+   /          \
+ Yes           No
+  ↓             ↓
+Use Bundle   WordPress
+             Fallback
 ```
 
-That is closer to an application/data model than a traditional collection of manually maintained WordPress pages.
+Reusable WordPress fields can provide fallback values when the Supabase layer is unavailable or a route does not yet have a published record.
 
 ---
 
-## SEO & AEO
+## WordPress Template Layer
 
-The platform was designed to support both traditional search optimization and increasingly structured answer-oriented content.
+The reusable template combines WordPress page context, local fallback fields, and the structured Supabase page bundle.
 
-The data layer makes it possible to manage page-specific information consistently instead of scattering it throughout templates.
+It can use database-driven values for:
 
-Areas the system is designed around include:
+- SEO title
+- Meta description
+- H1
+- Canonical URL
+- Robots directives
+- Open Graph metadata
+- Technology
+- Content sections
+- FAQs
+- JSON-LD
 
-- Page-specific SEO titles
-- Primary page headings
-- Market-specific content
-- Technology-aware content
-- Structured page information
-- Search-oriented content organization
-- Reusable localized page architecture
-
----
-
-## Example Data Flow
-
-```mermaid
-sequenceDiagram
-    participant V as Visitor
-    participant W as WordPress
-    participant P as SEO/AEO Plugin
-    participant S as Supabase
-    participant T as Page Template
-
-    V->>W: Request localized URL
-    W->>P: Initialize page data
-    P->>P: Resolve request path
-    P->>S: Fetch matching SEO/AEO record
-    S-->>P: Structured content
-    P-->>T: Page data
-    T-->>W: Render localized page
-    W-->>V: Final page
-```
+**[View the simplified reusable template →](examples/simplified-local-town-template.php)**
 
 ---
 
-## Error Handling
+## Structured Data
 
-The integration needs to handle situations where the external content source is unavailable or a route does not have a matching record.
+The structured-data layer builds JSON-LD from the same page bundle used by the page renderer.
 
-Conceptually:
+The public example demonstrates `WebPage`, `Service`, and `FAQPage` schema and respects `include_in_schema` independently from visible FAQ rendering.
 
 ```text
-Request Page Data
-      ↓
-Record Found?
-   /        \
- Yes        No
-  ↓          ↓
-Use Data   Safe Fallback
+Page Bundle
+     ↓
+SEO Metadata
+     ↓
+Locality / Technology
+     ↓
+Schema-Eligible FAQs
+     ↓
+JSON-LD Graph
 ```
 
-The WordPress page should not fail completely simply because an SEO content lookup does not return the expected result.
+**[View the structured-data example →](examples/structured-data-builder.php)**
 
 ---
 
-## Configuration
+## Implementation Examples
 
-Connection information is kept outside the public codebase.
+The production platform remains private, but the repository includes sanitized examples of the main implementation patterns:
 
-Conceptually:
+- **[PostgreSQL page aggregation →](examples/supabase-page-content-view.sql)**
+- **[PL/pgSQL local content generation →](examples/local-content-generator.sql)**
+- **[WordPress / Supabase client →](examples/seo-content-client.php)**
+- **[Structured-data builder →](examples/structured-data-builder.php)**
+- **[Reusable local template →](examples/simplified-local-town-template.php)**
+- **[Synthetic page record →](examples/sample-page-record.json)**
+- **[Synthetic API response →](examples/sample-api-response.json)**
+- **[Synthetic rendered page →](examples/sample-rendered-page.md)**
+- **[Implementation examples README →](examples/README.md)**
 
-```php
-define('SEO_CONTENT_API_URL', 'configured-outside-source');
-define('SEO_CONTENT_API_KEY', 'configured-outside-source');
+---
+
+## Example End-to-End Flow
+
+```text
+Synthetic Page Record
+        ↓
+Page Content View
+        ↓
+Page-Oriented JSON Bundle
+        ↓
+Supabase REST
+        ↓
+SEO Content Client
+        ↓
+Reusable WordPress Template
+        ↓
+Structured Data Builder
+        ↓
+Rendered HTML + Metadata + JSON-LD
 ```
 
-Production credentials are never included in this repository.
+The database remains normalized for management and integrity while the presentation layer receives a page-shaped document.
 
 ---
 
 ## Practical Benefits
 
-The platform reduces the amount of manual work required to maintain localized website content.
+The architecture reduces several common problems associated with large localized websites:
 
-It provides:
+- Repetitive manual page creation
+- SEO fields scattered across templates
+- Duplicate market content
+- Inconsistent titles and headings
+- Hard-coded local FAQs
+- Difficult bulk updates
+- Content tightly coupled to PHP templates
+- Manual internal-link maintenance
+- Uncontrolled automatic content overwrites
+- Separate API requests for every related content type
 
-- One reusable page architecture
-- Centralized structured SEO/AEO content
-- Consistent page-level fields
-- Easier market updates
-- Less duplicated WordPress content
-- Cleaner separation between data and presentation
-- A foundation that can scale as more localized routes are added
-
----
-
-## Technical Areas
-
-The project includes work across:
-
-- PHP
-- WordPress
-- Supabase
-- PostgreSQL
-- REST APIs
-- HTML / CSS
-- Dynamic templates
-- Route-based content lookup
-- Data modeling
-- Error handling
-- Environment configuration
-- SEO architecture
-- AEO content structure
-
----
-
-## Examples
-
-This repository includes sanitized examples based on the production architecture.
-
-### Simplified WordPress Template
-
-[`examples/simplified-local-town-template.php`](examples/simplified-local-town-template.php)
-
-A reduced version of the reusable local-town template showing:
-
-- ACF with native WordPress custom-field fallback
-- Dynamic `{town}`, `{state}`, and `{state_code}` values
-- Supabase SEO/AEO overrides
-- Dynamic fallback content
-- Technology-aware page data
-- Structured FAQ handling
-- Server-rendered SEO metadata
-- JSON-LD generation
-- WordPress sanitization and escaping
-
-The production template is substantially larger and includes additional service logic, market-specific behavior, lead handling, styling, and internal integrations that are intentionally not included in the public repository.
-
-### Example Supabase Page Record
-
-[`examples/sample-page-record.json`](examples/sample-page-record.json)
-
-Shows the type of structured page record used by the content platform with public-safe parameters such as:
+Instead, the platform provides:
 
 ```text
-{town}
-{state}
-{state_code}
-{technology}
+One Structured Content Model
+        +
+One Page Aggregation Layer
+        +
+One Route-Based Integration
+        +
+Reusable Templates
 ```
-
-A record can conceptually provide:
-
-```text
-Path
-Locality
-State
-Technology
-SEO Title
-H1
-Meta Description
-Canonical URL
-Robots Settings
-Structured FAQs
-```
-
-### Example API Response
-
-[`examples/sample-api-response.json`](examples/sample-api-response.json)
-
-Shows the same type of structured SEO/AEO record in the response shape received by the WordPress integration layer.
-
-### Example Data Flow
-
-```text
-Supabase Page Record
-        ↓
-REST API Response
-        ↓
-SEO / AEO WordPress Plugin
-        ↓
-Reusable Local Town Template
-        ↓
-SEO Metadata + H1 + FAQs + JSON-LD
-        ↓
-Localized Server-Rendered Page
-```
-
-> All example records are synthetic and use placeholders. Production URLs, credentials, market records, pricing logic, lead-routing logic, internal integrations, and proprietary business rules have been removed.
 
 ---
 
 ## My Role
 
-I designed and built the system around an existing WordPress website and localized page structure.
+I designed and built the platform around an existing WordPress website and localized service-area structure.
 
 My work included:
 
-- Designing the SEO/AEO content model
-- Building the Supabase-backed content layer
-- Developing the custom WordPress integration
-- Implementing path-based page lookup
+- Designing the PostgreSQL SEO/AEO content model
+- Designing the hierarchical page structure
+- Modeling parent/child page relationships
+- Creating structured content tables
+- Developing PL/pgSQL generation functions
+- Designing technology-aware local content rules
+- Implementing editorial SEO locking
+- Building the aggregated page-content view
+- Working with PostgreSQL JSONB
 - Connecting WordPress to Supabase
+- Building route-based page resolution
+- Developing the WordPress integration layer
+- Building reusable local templates
+- Implementing dynamic fallback behavior
+- Rendering database-driven content sections
+- Building FAQ and structured-data handling
+- Implementing canonical, robots, and Open Graph metadata
 - Testing API connectivity
-- Handling route-specific content
-- Separating market data from presentation logic
-- Working with dynamic page templates
-- Troubleshooting data retrieval and rendering
-- Managing production configuration separately from source code
+- Troubleshooting route and content resolution
+- Separating production configuration from source code
 - Designing the platform so additional local pages can use the same workflow
+
+The project combines marketing strategy with database design, content architecture, APIs, PHP development, SEO engineering, and automation.
 
 ---
 
 ## Source Code & Production Data
 
-The production implementation remains private because it contains:
+The complete production implementation remains private because it contains:
 
-- Internal website configuration
 - Production database access
-- Proprietary market data
+- Private Supabase configuration
+- Internal website configuration
+- Real market records
 - Company-specific SEO/AEO content
-- Private API configuration
-- Production page rules
+- Production promotion and pricing information
+- Internal service rules
+- Operational routing logic
+- Private integrations
+- Production credentials
 
-This repository focuses on the architecture and engineering approach rather than exposing production infrastructure.
+The examples in this repository have been simplified, renamed, and sanitized. All public sample records are synthetic.
 
 ---
 
@@ -483,31 +650,38 @@ This repository focuses on the architecture and engineering approach rather than
 For a deeper look at the system:
 
 - **[System Architecture →](docs/architecture.md)**  
-  WordPress integration, Supabase content storage, path resolution, request flow, configuration, failure handling, and page rendering architecture.
+  WordPress integration, Supabase content storage, path resolution, request flow, failure handling, and page-rendering architecture.
 
 - **[Technical Overview →](docs/technical-overview.md)**  
-  Implementation concepts covering PHP plugin design, REST requests, Supabase queries, content modeling, caching considerations, error handling, security, testing, and scalability.
+  Implementation concepts covering PHP, REST requests, Supabase, PostgreSQL, content modeling, structured data, security, testing, and scalability.
+
+- **[Implementation Examples →](examples/README.md)**  
+  Sanitized SQL, PL/pgSQL, PHP, JSON, and rendered examples showing the main implementation patterns.
 
 ---
 
 ## Summary
 
-The platform turns localized SEO content into structured application data.
+The platform turns SEO/AEO content into structured application data.
 
 ```text
-Localized URL
-      ↓
-WordPress
-      ↓
-Custom Plugin
-      ↓
-Supabase
-      ↓
-Structured SEO / AEO Record
-      ↓
+Hierarchical Website Model
+        ↓
+PostgreSQL / Supabase
+        ↓
+SEO + AEO Content Generation
+        ↓
+Relational Content
+        ↓
+Page Content View
+        ↓
+Page-Level JSON
+        ↓
+Route-Based WordPress Integration
+        ↓
 Reusable Template
-      ↓
-Localized Web Page
+        ↓
+SEO Metadata + Content + JSON-LD
 ```
 
-What started as a website content problem became a reusable system for managing localized search content through data, APIs, and application logic.
+What began as a localized website-content problem became a reusable content platform that connects marketing strategy, database design, automation, APIs, and WordPress application logic.
