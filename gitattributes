@@ -1,0 +1,5 @@
+# Include public implementation examples in GitHub Linguist language statistics.
+# The examples directory may otherwise be treated as documentation.
+
+examples/*.php -linguist-documentation linguist-detectable=true
+examples/*.sql -linguist-documentation linguist-detectable=true
