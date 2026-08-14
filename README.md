@@ -10,6 +10,16 @@ Instead of maintaining every localized page as a separate collection of hard-cod
 
 ---
 
+## Project Context
+
+**Development began:** April 2026  
+**Status:** Production system under ongoing development  
+**Public showcase:** August 2026
+
+This repository is a sanitized portfolio representation of a privately maintained production system. The public commit history reflects the creation and maintenance of this showcase, not the full development history of the production platform.
+
+---
+
 ## Overview
 
 Localized websites become difficult to manage when every town, state, service, promotion, FAQ, title, description, internal link, and structured-data element is maintained independently inside WordPress.
