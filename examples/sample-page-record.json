@@ -1,27 +1,28 @@
 {
-  "path": "/national/{state}/{town}/",
-  "locality_name": "{town}",
-  "state_name": "{state}",
-  "state_code": "{state_code}",
-  "technology": "{technology}",
-  "seo_title": "High-Speed Internet in {town}, {state_code} | Provider",
-  "h1": "High-Speed Internet in {town}, {state}",
-  "meta_description": "Explore internet service options available in {town}, {state}. Availability and technology can vary by exact service address.",
-  "canonical_url": "https://www.example.com/national/{state}/{town}/",
+  "id": "00000000-0000-4000-8000-000000000101",
+  "page_name": "Example Town Service Area",
+  "page_type": "market",
+  "slug": "example-town",
+  "path": "/national/example-state/example-town/",
+  "seo_title": "Fiber & Cable Internet in Example Town, ES | Provider",
+  "meta_description": "Explore local internet options in Example Town. Technology and availability vary by address.",
+  "primary_keyword": "internet service Example Town ES",
+  "canonical_url": "https://example.com/national/example-state/example-town/",
   "robots_index": true,
   "robots_follow": true,
-  "faqs": [
-    {
-      "question": "Is internet service available in {town}, {state_code}?",
-      "short_answer": "Service is available in select areas. Availability should be confirmed using the exact service address.",
-      "detailed_answer": "Service availability, technology, speeds, and plan options can vary by location within {town}. The exact service address is used to determine what is available.",
-      "include_on_page": true
-    },
-    {
-      "question": "What internet technology is available in {town}?",
-      "short_answer": "The page record identifies the technology available for the market.",
-      "detailed_answer": "The structured SEO/AEO record carries a technology value such as fiber, coax, or a combined service classification. The reusable template uses that data when building page content and structured data.",
-      "include_on_page": true
-    }
-  ]
+  "h1": "Fiber & Cable Internet in Example Town, Example State",
+  "eyebrow": "Local Service Area",
+  "intro_content": "Internet service is available in select parts of Example Town.",
+  "answer_engine_summary": "Fiber and cable internet are available in select parts of Example Town. Exact availability varies by address.",
+  "key_answer": "Service is available in select parts of Example Town. Check the exact address for availability.",
+  "status": "published",
+  "active": true,
+  "parent_page_id": "00000000-0000-4000-8000-000000000010",
+  "hierarchy_level": 3,
+  "geographic_scope": "local",
+  "state_code": "ES",
+  "locality_name": "Example Town",
+  "locality_type": "city",
+  "technology": "fiber_coax",
+  "seo_locked": false
 }
