@@ -2,1861 +2,1539 @@
 
 ## Introduction
 
-The SEO & AEO Content Platform is a database-driven content system that connects WordPress to structured SEO/AEO records stored in Supabase/PostgreSQL.
+The SEO & AEO Content Platform is a database-driven content system that connects WordPress to a structured PostgreSQL/Supabase content model.
 
-The production website uses WordPress for page delivery and reusable templates, while a custom PHP plugin retrieves route-specific content from Supabase based on the current request path.
+The production architecture separates:
 
-The goal is to make localized service pages easier to manage at scale without hard-coding market-specific SEO content directly into each page template.
+```text
+Content Modeling
+      ↓
+PostgreSQL / Supabase
 
-This document focuses on implementation concepts and engineering decisions. Production credentials, exact table schemas, private endpoints, proprietary content, internal market data, and company-specific rules are intentionally excluded.
+Content Generation
+      ↓
+PL/pgSQL
+
+Application Delivery
+      ↓
+Supabase REST
+
+Presentation
+      ↓
+WordPress / PHP
+```
+
+The platform is designed to manage localized SEO and answer-engine content without hard-coding every market-specific title, FAQ, content section, internal link, or metadata value directly into separate WordPress templates.
+
+This document focuses on the implementation patterns represented in the public showcase. Production credentials, private market records, real pricing, private endpoints, company-specific content, and proprietary integrations are intentionally excluded.
 
 ---
 
-## 1. Technology Stack
+# 1. Technology Stack
 
 | Area | Technology | Responsibility |
 |---|---|---|
-| CMS | WordPress | Page routing and rendering |
-| Integration Layer | PHP | Custom SEO/AEO plugin |
-| Data Store | Supabase / PostgreSQL | Structured page content |
-| API Layer | Supabase REST API | Content retrieval |
-| Front End | WordPress Templates / HTML / CSS | Page presentation |
-| Configuration | WordPress / Environment Config | API URL, keys, options |
-| Data Model | SQL / PostgreSQL | Route-driven content records |
-| Content Strategy | SEO / AEO | Search and answer-oriented content |
+| CMS / Presentation | WordPress | Routing, theme integration, template rendering |
+| Integration | PHP | Route resolution, API retrieval, response validation, fallbacks |
+| Data Store | PostgreSQL / Supabase | Structured SEO/AEO content |
+| Database Logic | SQL / PL/pgSQL | Relational modeling, local content generation |
+| Document Assembly | PostgreSQL JSONB | Aggregating relational content into page bundles |
+| API | Supabase REST | Page-oriented content delivery |
+| Structured Data | Schema.org / JSON-LD | WebPage, Service, FAQ structured output |
+| WordPress Data | ACF / post meta | Existing dynamic fallback fields |
+| Front End | PHP / HTML / CSS | Server-rendered presentation |
+| Content Strategy | SEO / AEO | Search metadata, answer content, FAQs, internal linking |
 
 ---
 
-## 2. Core Request Model
+# 2. Core Request Flow
 
-The live request flow is:
+The live rendering path is read-oriented.
 
 ```text
-Visitor requests localized URL
+Visitor requests URL
         ↓
-WordPress resolves page
+WordPress resolves request
         ↓
-Custom plugin inspects request path
+SEO client reads current path
         ↓
 Path is normalized
         ↓
-Supabase request is generated
+Supabase REST request
         ↓
-Matching content record is returned
+PostgreSQL page-content view
         ↓
-Response is validated
+Page-level JSON bundle
         ↓
-Template receives structured page data
+PHP validates response
         ↓
-Localized page is rendered
+Reusable template receives page data
+        ↓
+HTML + metadata + JSON-LD rendered
 ```
 
-The key design principle is that the URL route acts as the link between WordPress and the structured content record.
+The URL path is the primary application lookup key.
 
 ---
 
-## 3. Plugin Bootstrap
+# 3. Page Identity
 
-A custom WordPress plugin provides the integration layer.
+Each structured page has its own identity.
 
-A basic plugin begins with a standard header and WordPress safety check:
+Important fields include:
 
-```php
-<?php
-/**
- * Plugin Name: SEO & AEO Content Engine
- * Description: Retrieves structured SEO and AEO page content.
- * Version: 1.0.0
- */
-
-if (!defined('ABSPATH')) {
-    exit;
-}
+```text
+id
+page_name
+page_type
+slug
+path
 ```
 
-The production plugin includes additional logic that is not published in the showcase.
-
----
-
-## 4. Separation of Responsibilities
-
-The plugin is easier to maintain when responsibilities are separated into functions.
+The `path` field provides the stable route used by WordPress to retrieve the page bundle.
 
 Conceptually:
 
 ```text
-Plugin
-├── Configuration
-├── Current Path Resolver
-├── Path Normalizer
-├── API Client
-├── Response Validator
-├── Page Data Accessor
-├── Cache Layer
-└── Error / Logging Layer
+WordPress URL
+      ↓
+Normalized Path
+      ↓
+seo_pages.path
+      ↓
+Matching Page
 ```
 
-This avoids turning the plugin into one large procedural block.
+A unique path constraint prevents multiple page records from unintentionally claiming the same route.
 
 ---
 
-## 5. Current Path Resolution
+# 4. Hierarchical Page Model
 
-The plugin needs to determine the path being requested.
-
-Conceptually:
-
-```php
-function seo_get_current_path() {
-    $uri = $_SERVER['REQUEST_URI'] ?? '/';
-
-    $path = parse_url($uri, PHP_URL_PATH);
-
-    return $path ?: '/';
-}
-```
-
-The actual production implementation may use WordPress routing helpers or additional handling.
-
----
-
-## 6. Why the Path Matters
-
-The page path is the lookup key.
-
-For example:
+Pages are organized into a hierarchy.
 
 ```text
-/national/pennsylvania/example-fiber/
+Homepage
+   ↓
+National Page
+   ↓
+State Page
+   ↓
+Local Market Page
 ```
 
-maps to one structured content record.
+The model includes:
 
-The route therefore becomes part of the content data model.
+```text
+parent_page_id
+hierarchy_level
+geographic_scope
+state_code
+locality_name
+locality_type
+technology
+```
+
+This allows the system to understand the role of a page without relying only on string parsing of the URL.
 
 ---
 
-## 7. Path Normalization
+# 5. Relational Content Model
 
-Paths need to be normalized before querying the data store.
+The page table contains page-level metadata and context, while repeatable content types live in related tables.
 
-Typical normalization can include:
-
-- Remove query strings
-- Ensure leading slash
-- Apply consistent trailing slash policy
-- Lowercase where appropriate
-- Remove duplicate slashes
-- Decode or normalize URL characters
-- Trim whitespace
-
-Conceptually:
-
-```php
-function seo_normalize_path($path) {
-    $path = trim($path);
-    $path = '/' . ltrim($path, '/');
-
-    if ($path !== '/') {
-        $path = rtrim($path, '/') . '/';
-    }
-
-    return strtolower($path);
-}
+```text
+seo_pages
+    │
+    ├── seo_page_keywords
+    ├── seo_page_faqs
+    ├── seo_content_sections
+    └── seo_internal_links
 ```
 
-The production rules may differ depending on how routes are stored.
+Pages can also reference:
+
+```text
+seo_markets
+seo_services
+seo_promotions
+```
+
+Redirect behavior is modeled separately through:
+
+```text
+seo_redirects
+```
+
+This keeps each content type independently manageable.
 
 ---
 
-## 8. Stable Route Keys
+# 6. SEO Fields
 
-A route-based architecture works best when the database uses a predictable normalized path.
+Page-level SEO fields can include:
+
+```text
+seo_title
+meta_description
+primary_keyword
+canonical_url
+robots_index
+robots_follow
+h1
+```
+
+These values are stored as structured fields rather than being embedded directly inside template PHP.
+
+That allows them to be:
+
+- Queried
+- Audited
+- Generated
+- Updated in bulk
+- Locked from regeneration
+- Delivered consistently to templates
+
+---
+
+# 7. AEO Fields
+
+The page model also includes fields intended for concise answer-oriented content.
+
+Examples include:
+
+```text
+answer_engine_summary
+key_answer
+```
+
+Related FAQ records provide additional structured answers.
+
+This separates direct-answer content from the larger body copy.
+
+---
+
+# 8. Open Graph Fields
+
+Page records can also contain:
+
+```text
+og_title
+og_description
+og_image_url
+```
+
+The template can prefer database values and fall back to standard SEO fields if a dedicated Open Graph value is unavailable.
+
+---
+
+# 9. Publishing State
+
+A page includes explicit publication controls.
+
+```text
+status
+published_at
+active
+```
+
+The WordPress client requests only records that are appropriate for live rendering.
 
 Conceptually:
 
 ```text
-Database path:
-/national/pennsylvania/example-fiber/
-
-Incoming request:
-/national/pennsylvania/example-fiber/
-
-Result:
-exact match
+path = current path
+active = true
+status = published
 ```
 
-Without normalization, logically identical routes can fail to match.
+This lets records exist in the database without automatically becoming public.
 
 ---
 
-## 9. Supabase Configuration
+# 10. Editorial SEO Locking
 
-Connection information should not be hard-coded into public source files.
+The `seo_locked` flag protects manually curated SEO fields.
+
+```text
+Page
+ ↓
+seo_locked?
+ /       \
+Yes       No
+ ↓         ↓
+Keep      Generate
+Manual    Defaults
+SEO
+```
+
+This avoids the common problem where a bulk generation process overwrites a deliberately optimized page.
+
+---
+
+# 11. Content Generation Entry Point
+
+Local content generation is orchestrated through a bundle-style PL/pgSQL function.
+
+Conceptually:
+
+```text
+Generate Local Content Bundle
+             ↓
+ ┌───────────┼────────────┬─────────────┐
+ ▼           ▼            ▼             ▼
+SEO       Keywords       FAQs        Sections
+Defaults
+```
+
+Each function owns one responsibility.
+
+This keeps generation logic easier to maintain and test than one large procedure.
+
+---
+
+# 12. Local-Page Validation
+
+Before local generation runs, the page is validated.
+
+Conceptually:
+
+```text
+Page Exists?
+    ↓
+Correct Hierarchy Level?
+    ↓
+geographic_scope = local?
+    ↓
+Eligible
+```
+
+Invalid page types are rejected instead of silently receiving local-market content.
+
+---
+
+# 13. Technology-Aware SEO Defaults
+
+SEO defaults can change according to technology.
+
+```text
+technology
+   ↓
+┌──────────┬──────────┬──────────────┐
+Fiber      Coax       Fiber + Coax
+```
+
+Technology can influence:
+
+- SEO title
+- Meta description
+- Primary keyword
+- H1
+- Answer-engine summary
+- Key answer
+- Open Graph title
+- Open Graph description
+
+This allows one generation system to support different local service conditions.
+
+---
+
+# 14. Structured Keyword Generation
+
+Keywords are stored as related rows rather than one comma-separated field.
+
+A keyword can contain:
+
+```text
+keyword
+keyword_type
+search_intent
+priority
+active
+```
+
+Example roles can include:
+
+```text
+primary
+secondary
+long_tail
+question
+```
+
+Priority determines ordering in the page bundle.
+
+---
+
+# 15. Deterministic Keyword Regeneration
+
+The public generation example uses a deterministic pattern:
+
+```text
+Delete Existing Generated Keywords
+        ↓
+Insert Current Keyword Set
+        ↓
+Add Technology-Specific Keywords
+```
+
+This makes repeated generation predictable.
+
+The same page context produces the same structured keyword pattern.
+
+---
+
+# 16. Structured FAQ Model
+
+FAQ records contain more than a question and answer.
+
+They can include:
+
+```text
+question
+short_answer
+detailed_answer
+answer_type
+display_order
+include_on_page
+include_in_schema
+authoritative
+source_reference
+verified_at
+active
+```
+
+These fields support both presentation and answer-engine governance.
+
+---
+
+# 17. FAQ Display vs. Schema Eligibility
+
+Visible page rendering and structured-data rendering use separate flags.
+
+```text
+include_on_page
+      ↓
+Visible FAQ
+
+include_in_schema
+      ↓
+FAQPage JSON-LD
+```
+
+The PHP template and the structured-data builder therefore do not use exactly the same filter.
+
+That is intentional.
+
+---
+
+# 18. FAQ Answer Selection
+
+The visible renderer and schema builder can prefer:
+
+```text
+detailed_answer
+```
+
+and fall back to:
+
+```text
+short_answer
+```
+
+when necessary.
 
 Conceptually:
 
 ```php
-define('SEO_SUPABASE_URL', getenv('SEO_SUPABASE_URL'));
-define('SEO_SUPABASE_KEY', getenv('SEO_SUPABASE_KEY'));
+$answer = !empty($faq['detailed_answer'])
+    ? $faq['detailed_answer']
+    : $faq['short_answer'];
 ```
 
-or through protected WordPress configuration.
-
-The public repository should never contain real production credentials.
+This gives the data model flexibility without forcing every record to contain the same answer length.
 
 ---
 
-## 10. Configuration Validation
+# 19. Content Sections
 
-Before calling the API, the plugin should verify required configuration exists.
+Body content is stored as ordered sections.
+
+A section can include:
+
+```text
+section_key
+section_type
+heading
+subheading
+content
+display_order
+active
+```
+
+This lets the template loop through structured content.
+
+```text
+content_sections[]
+        ↓
+Sort / Return in display order
+        ↓
+Reusable Template
+```
+
+The page body is therefore data-driven without being one unstructured HTML blob.
+
+---
+
+# 20. Internal Links
+
+Internal links are structured records.
+
+A record can contain:
+
+```text
+source_page_id
+destination_page_id
+destination_url
+anchor_text
+relationship
+priority
+active
+```
+
+This makes parent, child, and other relationships queryable.
 
 Conceptually:
 
-```php
-if (
-    !defined('SEO_SUPABASE_URL') ||
-    !defined('SEO_SUPABASE_KEY')
-) {
-    return null;
+```text
+State Page
+   ↓ child
+Local Page
+
+Local Page
+   ↑ parent
+State Page
+```
+
+Internal linking is part of the data model rather than only part of manually written page copy.
+
+---
+
+# 21. Page Content View
+
+The application does not retrieve every related table separately.
+
+A PostgreSQL view assembles the page into one document.
+
+```text
+seo_pages
+   +
+seo_markets
+   +
+seo_services
+   +
+seo_promotions
+   +
+seo_page_keywords
+   +
+seo_page_faqs
+   +
+seo_content_sections
+   +
+seo_internal_links
+        ↓
+Page Content View
+        ↓
+One JSON Bundle
+```
+
+The public implementation demonstrates this pattern directly.
+
+---
+
+# 22. PostgreSQL JSONB Aggregation
+
+The view uses PostgreSQL JSONB functions such as:
+
+```sql
+jsonb_build_object(...)
+jsonb_agg(...)
+coalesce(..., '[]'::jsonb)
+```
+
+This lets relational child rows become ordered arrays.
+
+Conceptually:
+
+```text
+Multiple FAQ Rows
+        ↓
+jsonb_agg()
+        ↓
+faqs[]
+```
+
+The same approach is used for:
+
+```text
+keywords[]
+faqs[]
+content_sections[]
+internal_links[]
+```
+
+---
+
+# 23. Optional Relationships
+
+Market, service, and promotion relationships are optional.
+
+The public page-content view returns a real JSON `null` when a relationship does not exist rather than constructing an object where every property is null.
+
+Conceptually:
+
+```text
+service_id exists?
+ /            \
+Yes            No
+ ↓              ↓
+Service Object  null
+```
+
+This produces a cleaner application contract.
+
+---
+
+# 24. Application-Oriented Document Shape
+
+The view creates a page document that is easier for WordPress to consume.
+
+Conceptually:
+
+```json
+{
+  "path": "/national/example-state/example-town/",
+  "seo_title": "...",
+  "h1": "...",
+  "technology": "fiber_coax",
+  "keywords": [],
+  "faqs": [],
+  "content_sections": [],
+  "internal_links": []
 }
 ```
 
-A missing configuration value should generate a controlled failure rather than a fatal error.
+The database remains relational for management, while the application receives a page-oriented structure.
 
 ---
 
-## 11. API Request Construction
+# 25. Supabase REST Retrieval
 
-The plugin builds a request against the structured content source.
+The WordPress client queries the page-content view through Supabase REST.
 
 Conceptually:
 
-```php
-$url = SEO_SUPABASE_URL
-    . '/rest/v1/seo_pages'
-    . '?path=eq.'
-    . rawurlencode($path)
-    . '&limit=1';
+```text
+/rest/v1/seo_page_content_public
+    ?path=eq.{normalized_path}
+    &active=eq.true
+    &status=eq.published
+    &limit=1
 ```
 
-This example is simplified.
-
-The production implementation may query a table, view, RPC function, or another secured endpoint.
+Production connection values are configured outside public source.
 
 ---
 
-## 12. WordPress HTTP API
+# 26. WordPress Request Path Resolution
 
-WordPress provides its own HTTP client functions.
+The PHP integration retrieves the current request path from the server request.
 
-A public-safe example:
+The public client uses:
+
+```text
+REQUEST_URI
+   ↓
+wp_unslash()
+   ↓
+wp_parse_url(..., PHP_URL_PATH)
+   ↓
+Normalized Path
+```
+
+Query strings are excluded from the lookup key.
+
+---
+
+# 27. Path Normalization
+
+The public client normalizes:
+
+- Leading slash
+- Trailing slash
+- Root path
+
+Conceptually:
+
+```text
+national/example/
+        ↓
+/national/example/
+```
+
+and:
+
+```text
+/
+```
+
+remains:
+
+```text
+/
+```
+
+The goal is to match the path convention used by PostgreSQL.
+
+---
+
+# 28. Configuration
+
+Production credentials are not stored in the public code.
+
+The client expects configuration similar to:
+
+```php
+PORTFOLIO_SEO_SUPABASE_URL
+PORTFOLIO_SEO_SUPABASE_KEY
+```
+
+The real values belong in protected application configuration.
+
+---
+
+# 29. HTTP Request
+
+The integration uses the WordPress HTTP API rather than requiring direct cURL handling.
+
+Conceptually:
 
 ```php
 $response = wp_remote_get(
     $url,
     [
+        'timeout' => 4,
         'headers' => [
-            'apikey' => SEO_SUPABASE_KEY,
-            'Authorization' => 'Bearer ' . SEO_SUPABASE_KEY,
+            'apikey' => $key,
+            'Authorization' => 'Bearer ' . $key,
+            'Accept' => 'application/json',
         ],
-        'timeout' => 5,
     ]
 );
 ```
 
-Using the WordPress HTTP API avoids relying directly on PHP cURL configuration.
+This keeps HTTP behavior consistent with WordPress conventions.
 
 ---
 
-## 13. Request Timeout
+# 30. API Failure Handling
 
-A defined timeout prevents a slow external service from indefinitely delaying page rendering.
-
-Conceptually:
+The client validates several failure conditions.
 
 ```text
-Request Supabase
-      ↓
-Response within timeout?
-   /          \
- Yes          No
-  ↓            ↓
-Continue     Fallback
+Request
+  ↓
+WP Error?
+  ↓
+HTTP 2xx?
+  ↓
+Valid JSON?
+  ↓
+At Least One Record?
+  ↓
+Record Structure Valid?
+  ↓
+Published + Active?
 ```
 
-Timeout behavior is especially important for a public website.
+Any failed step returns `null` to the template layer.
+
+The public example intentionally favors safe failure over throwing a front-end exception.
 
 ---
 
-## 14. HTTP Error Handling
+# 31. Page Accessor
 
-A request can fail before valid JSON is returned.
-
-The plugin should distinguish between:
-
-- Transport error
-- Timeout
-- Authentication error
-- HTTP 4xx
-- HTTP 5xx
-- Valid response with no matching record
+The client exposes a simple application-facing function.
 
 Conceptually:
 
 ```php
-if (is_wp_error($response)) {
-    return null;
-}
-
-$status = wp_remote_retrieve_response_code($response);
-
-if ($status < 200 || $status >= 300) {
-    return null;
-}
+portfolio_seo_current_page()
 ```
 
----
-
-## 15. JSON Parsing
-
-Supabase returns structured JSON.
-
-Conceptually:
-
-```php
-$body = wp_remote_retrieve_body($response);
-$data = json_decode($body, true);
-```
-
-The plugin should verify decoding succeeded before using the data.
-
----
-
-## 16. Response Shape Validation
-
-A successful HTTP response does not automatically mean the payload is valid.
-
-The plugin should verify:
+Internally:
 
 ```text
-Response is an array
-At least one record exists
-Expected keys exist
-Required values are usable
+Resolve Current Path
+        ↓
+Fetch Page by Path
+        ↓
+Return Array or null
 ```
 
-Conceptually:
-
-```php
-if (!is_array($data) || empty($data)) {
-    return null;
-}
-
-$page = $data[0];
-```
+This keeps the template from needing to understand Supabase request syntax.
 
 ---
 
-## 17. Required vs Optional Fields
+# 32. WordPress Fallback Data
 
-The page model should distinguish between required fields and optional fields.
+The reusable template can still read existing WordPress data.
 
-Example:
+The public example supports:
 
 ```text
-Required
-├── path
-├── seo_title
-└── h1
-
-Optional
-├── intro
-├── faq
-├── technology
-├── metadata
-└── additional sections
+ACF
+  or
+Native post meta
 ```
 
-Optional fields should not break rendering when absent.
-
----
-
-## 18. Public Page Data Function
-
-The plugin can expose one clean function to the template layer.
-
-Conceptually:
-
-```php
-function seo_get_page_data() {
-    $path = seo_get_current_path();
-    $path = seo_normalize_path($path);
-
-    return seo_fetch_page($path);
-}
-```
-
-This keeps template code simple.
-
----
-
-## 19. Template Consumption
-
-The template receives structured data without needing to understand Supabase.
-
-Conceptually:
-
-```php
-$page = seo_get_page_data();
-
-if ($page) {
-    echo esc_html($page['h1']);
-}
-```
-
-That clean boundary is one of the most important implementation decisions.
-
----
-
-## 20. Template Independence
-
-The WordPress template should not need to know:
-
-- API URLs
-- Supabase authentication
-- Query syntax
-- HTTP status handling
-- JSON parsing
-- Retry behavior
-
-It should only work with application-friendly page data.
-
----
-
-## 21. SEO Title Integration
-
-A structured record can provide the SEO title for the current route.
-
-Conceptually:
-
-```php
-$page['seo_title']
-```
-
-The plugin or theme can then integrate that value with the WordPress title-generation process.
-
----
-
-## 22. H1 Rendering
-
-The primary heading can be data-driven:
-
-```php
-<h1>
-    <?php echo esc_html($page['h1']); ?>
-</h1>
-```
-
-Escaping is important even when the content source is controlled.
-
----
-
-## 23. Structured Content Sections
-
-Instead of storing one large block of HTML, content can be divided into fields.
-
-For example:
+for fields such as:
 
 ```text
-intro
-service_summary
-technology_summary
-local_context
-faq
-cta
+town_name
+state_code
+state_name
+technology
 ```
 
-This makes it easier to reuse and render content selectively.
+The integration therefore augments an existing dynamic WordPress setup instead of requiring the entire page system to move into Supabase.
 
 ---
 
-## 24. FAQ Storage
+# 33. Supabase Override Pattern
 
-FAQs can be stored as structured JSON.
-
-Example:
-
-```json
-[
-  {
-    "question": "What service is available?",
-    "answer": "Availability depends on the exact service address."
-  },
-  {
-    "question": "How do I check availability?",
-    "answer": "Enter your address or contact the service team."
-  }
-]
-```
-
-This format is easier to render consistently than freeform HTML.
-
----
-
-## 25. FAQ Rendering
+The template builds safe defaults first.
 
 Conceptually:
 
 ```php
-if (!empty($page['faqs'])) {
-    foreach ($page['faqs'] as $faq) {
-        // Render question and answer.
-    }
-}
+$fallback_title = ...;
+$fallback_h1 = ...;
+$fallback_meta = ...;
 ```
 
-The template can control the HTML structure.
+Then it prefers structured database values when available.
+
+```text
+Supabase Value Present?
+ /                 \
+Yes                 No
+ ↓                   ↓
+Use Supabase       Use WordPress
+Value              Fallback
+```
+
+This is used for:
+
+- SEO title
+- H1
+- Meta description
+- Canonical URL
+- Technology
+- Open Graph values
+- Robots directives
 
 ---
 
-## 26. Structured Data / Schema Support
+# 34. Visible FAQ Rendering
 
-Structured FAQ data can also support JSON-LD generation.
-
-Conceptually:
+The template filters the page bundle using:
 
 ```text
-FAQ Record
-    ↓
-HTML FAQ
-    +
-FAQPage JSON-LD
+include_on_page
 ```
 
-The architecture makes this easier because questions and answers already exist as structured data.
+Then it sanitizes:
+
+```text
+question
+detailed_answer / short_answer
+```
+
+before rendering.
+
+This prevents schema-only records from automatically appearing in the visible FAQ section.
 
 ---
 
-## 27. AEO-Oriented Content
+# 35. Dynamic Section Rendering
 
-Answer-oriented content benefits from structured fields such as:
+The template loops through `content_sections`.
+
+Each section is validated before rendering.
+
+Fields are handled according to context:
 
 ```text
-Direct Answer
+heading     → plain text
+subheading  → plain text
+content     → controlled HTML
+```
+
+The public example uses WordPress escaping and sanitization helpers to preserve that boundary.
+
+---
+
+# 36. Robots Directives
+
+The page bundle includes separate booleans:
+
+```text
+robots_index
+robots_follow
+```
+
+The template converts them into a meta value such as:
+
+```text
+index, follow
+```
+
+or:
+
+```text
+noindex, follow
+```
+
+This gives the content model direct control over page-level crawler directives.
+
+---
+
+# 37. Canonical URL
+
+The canonical URL can come from the page bundle.
+
+If no structured value exists, the template can fall back to the WordPress permalink.
+
+```text
+Database canonical_url
+        ↓
+Preferred
+
+WordPress permalink
+        ↓
+Fallback
+```
+
+---
+
+# 38. Structured Data Builder
+
+Structured data is handled in a separate PHP helper rather than being mixed into the API client.
+
+The public builder can generate:
+
+```text
+WebPage
+Service
+FAQPage
 Question
 Answer
-Service Description
-Availability Explanation
-Technology Explanation
 ```
 
-This makes the system better suited to answer engines than a single large content blob.
+This keeps:
+
+```text
+Data Retrieval
+      ≠
+Schema Rendering
+```
+
+which makes both pieces easier to reason about.
 
 ---
 
-## 28. Market-Specific Content
+# 39. WebPage Schema
 
-Localized pages can vary by:
+The builder can use:
 
-- City
-- State
-- Market
-- Service technology
-- Offer context
-- Service availability
-- Local FAQs
-- Local headings
+```text
+canonical_url
+seo_title
+h1
+meta_description
+```
 
-The content database carries these differences while the template stays reusable.
-
----
-
-## 29. Technology-Aware Rendering
-
-The content record can include a technology field.
+to create the `WebPage` entity.
 
 Conceptually:
 
-```php
-switch ($page['technology']) {
-    case 'fiber':
-        // Fiber-specific rendering.
-        break;
-
-    case 'coax':
-        // Coax-specific rendering.
-        break;
+```json
+{
+  "@type": "WebPage",
+  "@id": "...#webpage",
+  "url": "...",
+  "name": "...",
+  "headline": "...",
+  "description": "..."
 }
 ```
 
-The production values and behavior are private.
-
 ---
 
-## 30. Existing Dynamic WordPress Data
+# 40. Service Schema
 
-The SEO/AEO layer can coexist with existing ACF or spreadsheet-driven data.
+For local pages, the builder can also emit a `Service` entity.
 
-Conceptually:
+It uses:
 
 ```text
-Existing Dynamic Data
-       +
-Supabase SEO/AEO Data
-       ↓
-WordPress Template
+locality_name
+state_code
+technology
 ```
 
-This is useful when the site already has operational or service data coming from another source.
+or fallback WordPress values if needed.
+
+This lets the structured page model drive local service-area context.
 
 ---
 
-## 31. Data Merge Strategy
+# 41. FAQPage Schema
 
-The template may combine data from multiple systems.
+FAQ schema is assembled only from records eligible for structured output.
+
+```text
+faqs[]
+   ↓
+include_in_schema = true
+   ↓
+Question + Answer entities
+   ↓
+FAQPage
+```
+
+The visible HTML FAQ list and FAQPage schema can therefore differ intentionally.
+
+---
+
+# 42. Server-Rendered Output
+
+The template writes:
+
+- `<title>`
+- Meta description
+- Robots directive
+- Canonical link
+- Open Graph fields
+- JSON-LD
+- H1
+- Dynamic sections
+- FAQs
+
+during the WordPress server render.
+
+The core SEO/AEO content is therefore available without requiring a client-side JavaScript fetch after page load.
+
+---
+
+# 43. Data and Code Deployment Separation
+
+Content changes and code changes follow different paths.
+
+```text
+Content Change
+    ↓
+PostgreSQL / Supabase
+    ↓
+Updated Page Bundle
+```
+
+does not necessarily require:
+
+```text
+PHP Deployment
+```
+
+Likewise:
+
+```text
+Template Improvement
+    ↓
+Code Deployment
+```
+
+does not require recreating every content record.
+
+This separation is one of the major operational benefits of the platform.
+
+---
+
+# 44. Content Generation and Publication Are Separate
+
+Generation does not automatically mean publication.
 
 Conceptually:
 
 ```text
-Page Identity
-+
-Market / Service Data
-+
-SEO/AEO Content
-+
-Offer / Product Data
+Generate / Update Content
+        ↓
+Database Record
+        ↓
+Review / Curate / Lock
+        ↓
+Published + Active
+        ↓
+Available to WordPress
+```
+
+This keeps automation separate from live rendering.
+
+---
+
+# 45. Security Model
+
+The public-facing integration needs read access to public page content, not administrative database control.
+
+The production architecture should keep:
+
+- Database passwords
+- Supabase service-role credentials
+- WordPress credentials
+- Private environment variables
+- Administrative APIs
+
+outside public source.
+
+The read path should follow least-privilege access.
+
+---
+
+# 46. Input Handling
+
+The route originates from an HTTP request.
+
+The integration therefore:
+
+```text
+Reads Request URI
+      ↓
+Extracts URL Path
+      ↓
+Normalizes
+      ↓
+Encodes API Query
+```
+
+It does not directly concatenate raw request input into SQL.
+
+---
+
+# 47. Output Handling
+
+Database content is still handled according to output context.
+
+Examples:
+
+```text
+Plain text       → esc_html()
+HTML attribute   → esc_attr()
+URL              → esc_url()
+Controlled HTML  → wp_kses_post()
+```
+
+A managed database is a trusted content source, but that does not eliminate the need for correct rendering boundaries.
+
+---
+
+# 48. Performance Characteristics
+
+The request path performs one page-bundle lookup instead of several separate content requests.
+
+Without aggregation:
+
+```text
+Fetch Page
+Fetch Keywords
+Fetch FAQs
+Fetch Sections
+Fetch Links
+```
+
+With the page-content view:
+
+```text
+Fetch One Page Bundle
+```
+
+This reduces application-side request coordination and simplifies template logic.
+
+---
+
+# 49. Database Query Characteristics
+
+The primary live lookup is selective.
+
+Conceptually:
+
+```text
+path = requested path
+active = true
+status = published
+limit = 1
+```
+
+The unique route model keeps this lookup deterministic.
+
+---
+
+# 50. Scaling Local Pages
+
+Adding another local market primarily requires structured data rather than a new template.
+
+```text
+New Page Record
+      ↓
+Generate / Curate Content
+      ↓
+Existing View
+      ↓
+Existing API Client
+      ↓
+Existing Template
+```
+
+This is the main scalability advantage of the system.
+
+---
+
+# 51. Database Auditing
+
+Structured fields make content auditing possible with SQL.
+
+Examples include finding:
+
+```text
+Pages without SEO titles
+Pages without H1s
+Inactive pages
+Unpublished pages
+Pages without keywords
+Pages without FAQs
+Pages with stale verification dates
+Pages with missing technology
+```
+
+This is significantly easier than opening individual WordPress pages manually.
+
+---
+
+# 52. Bulk Content Operations
+
+The relational model also enables controlled bulk operations.
+
+Examples include:
+
+- Regenerating local SEO defaults
+- Refreshing technology-specific FAQs
+- Rebuilding keyword records
+- Updating repeated terminology
+- Auditing hierarchy relationships
+- Rebuilding internal links
+- Updating structured content sections
+
+These operations can target data instead of template files.
+
+---
+
+# 53. Testing Strategy
+
+The public architecture can be tested at several levels.
+
+## Database Generation
+
+- Missing page
+- Wrong hierarchy
+- Wrong geographic scope
+- SEO-locked page
+- Fiber page
+- Coax page
+- Mixed-technology page
+
+## View Aggregation
+
+- Page with no market
+- Page with no service
+- Page with no promotion
+- Empty keyword array
+- Empty FAQ array
+- Empty content-section array
+- Empty internal-link array
+- Correct ordering
+
+## API Client
+
+- Root route
+- Local route
+- Missing configuration
+- Transport error
+- HTTP error
+- Empty response
+- Invalid JSON
+- Unpublished page
+- Inactive page
+
+## Rendering
+
+- Supabase override
+- WordPress fallback
+- Robots output
+- Canonical output
+- Open Graph output
+- Content sections
+- Visible FAQs
+- FAQ schema filtering
+- HTML escaping
+
+---
+
+# 54. Troubleshooting Flow
+
+When expected content is not appearing:
+
+```text
+Check WordPress Request Path
+        ↓
+Check Normalized Path
+        ↓
+Check Supabase Configuration
+        ↓
+Check Published Page Exists
+        ↓
+Check Page-Content View Output
+        ↓
+Check API Response
+        ↓
+Check Template Function
+        ↓
+Check Rendering / Fallback
+```
+
+This isolates whether the problem is:
+
+- Routing
+- Data
+- API integration
+- Publication state
+- Template consumption
+- Rendering
+
+---
+
+# 55. Public Implementation Files
+
+The repository includes public-safe examples for the major implementation layers.
+
+```text
+examples/
+├── supabase-page-content-view.sql
+├── local-content-generator.sql
+├── seo-content-client.php
+├── structured-data-builder.php
+├── simplified-local-town-template.php
+├── sample-page-record.json
+├── sample-api-response.json
+└── sample-rendered-page.md
+```
+
+The implementation flow is:
+
+```text
+Structured Page Record
+        ↓
+PL/pgSQL Generation
+        ↓
+Relational Child Records
+        ↓
+PostgreSQL Page Content View
+        ↓
+Supabase REST
+        ↓
+WordPress PHP Client
+        ↓
+Reusable Template
+        ↓
+Structured Data Builder
         ↓
 Rendered Page
 ```
 
-The plugin should keep its own responsibility narrow: retrieve and provide SEO/AEO content.
-
----
-
-## 32. Missing Record Behavior
-
-A missing Supabase record is not necessarily an application error.
-
-Conceptually:
-
-```text
-Route exists in WordPress
-      ↓
-SEO/AEO record exists?
-   /        \
- Yes        No
-  ↓          ↓
-Use Data   Continue safely
-```
-
-The site can still render using existing page data or fallback content.
-
----
-
-## 33. Fallback Content
-
-A fallback might come from:
-
-- WordPress page content
-- ACF fields
-- A generic template value
-- Default metadata
-- Existing dynamic source
-
-The production fallback behavior is private.
-
----
-
-## 34. Avoiding Fatal Dependencies
-
-The external content system should enhance the site, not become a single point of failure.
-
-Bad behavior:
-
-```text
-Supabase unavailable
-        ↓
-Entire page crashes
-```
-
-Preferred behavior:
-
-```text
-Supabase unavailable
-        ↓
-Log failure
-        ↓
-Use fallback
-        ↓
-Page still renders
-```
-
----
-
-## 35. Logging
-
-Useful operational logs can include:
-
-```text
-Timestamp
-Path
-Lookup result
-HTTP status
-Timeout
-Missing record
-Invalid response
-Missing configuration
-```
-
-Sensitive keys and full private payloads should not be logged.
-
----
-
-## 36. Debug Mode
-
-A development-only debug mode can display or log additional information.
-
-For example:
-
-```text
-Current Path
-Matched Record
-Technology
-SEO Title
-H1
-```
-
-Debug output should never expose credentials.
-
----
-
-## 37. Development Connectivity Test
-
-A simple test endpoint or temporary debug block can verify:
-
-```text
-WordPress can reach Supabase
-Path resolves correctly
-Matching record exists
-Expected fields are returned
-```
-
-Temporary diagnostics should be removed once the integration is verified.
-
----
-
-## 38. Caching
-
-Fetching the same content repeatedly can create unnecessary API traffic.
-
-A WordPress transient can conceptually cache route data:
-
-```php
-$key = 'seo_page_' . md5($path);
-
-$cached = get_transient($key);
-
-if ($cached !== false) {
-    return $cached;
-}
-```
-
----
-
-## 39. Writing to Cache
-
-After a successful lookup:
-
-```php
-set_transient(
-    $key,
-    $page,
-    15 * MINUTE_IN_SECONDS
-);
-```
-
-The exact production TTL depends on how quickly content changes.
-
----
-
-## 40. Cache Duration Tradeoff
-
-```text
-Short TTL
-  → Fresher content
-  → More API calls
-
-Long TTL
-  → Faster / fewer calls
-  → Slower updates
-```
-
-A reasonable TTL depends on editorial frequency.
-
----
-
-## 41. Negative Caching
-
-Repeated requests for a missing route can also create unnecessary database traffic.
-
-A short negative cache can reduce repeated failed lookups.
-
-Care must be taken not to keep newly published routes hidden for too long.
-
----
-
-## 42. Cache Invalidation
-
-Possible invalidation methods include:
-
-- TTL expiration
-- Manual cache clear
-- Publish-time invalidation
-- Deployment invalidation
-- Administrative tooling
-
----
-
-## 43. Supabase Query Performance
-
-The route lookup should be supported by an index.
-
-Conceptually:
-
-```sql
-CREATE INDEX idx_seo_pages_path
-ON seo_pages(path);
-```
-
-This is illustrative only.
-
----
-
-## 44. Unique Route Constraint
-
-A normalized route should normally identify a single page record.
-
-Conceptually:
-
-```sql
-ALTER TABLE seo_pages
-ADD CONSTRAINT seo_pages_path_unique
-UNIQUE (path);
-```
-
-This prevents ambiguous lookups.
-
----
-
-## 45. Content Status
-
-A record can conceptually include a status such as:
-
-```text
-draft
-review
-published
-archived
-```
-
-The live API query can limit results to publishable content.
-
----
-
-## 46. Publish Filtering
-
-Conceptually:
-
-```sql
-SELECT *
-FROM seo_pages
-WHERE path = :path
-  AND status = 'published'
-LIMIT 1;
-```
-
-The exact production workflow may differ.
-
----
-
-## 47. Content Versioning
-
-As the system grows, useful metadata can include:
-
-```text
-created_at
-updated_at
-published_at
-content_version
-```
-
-This helps with auditing and troubleshooting.
-
----
-
-## 48. Schema Evolution
-
-New content requirements may require additional fields.
-
-A controlled migration flow can be:
-
-```text
-Add field
-   ↓
-Update existing records
-   ↓
-Update plugin data model
-   ↓
-Update template
-   ↓
-Deploy
-```
-
----
-
-## 49. Backward Compatibility
-
-Templates should tolerate newly optional fields being absent from older records.
-
-Conceptually:
-
-```php
-$intro = $page['intro'] ?? '';
-```
-
-This prevents schema changes from immediately breaking old pages.
-
----
-
-## 50. PostgreSQL Data Types
-
-Different content structures can use different PostgreSQL types.
-
-Examples:
-
-```text
-text
-varchar
-boolean
-jsonb
-timestamp
-integer
-```
-
-JSONB can be useful for repeated content blocks such as FAQs.
-
----
-
-## 51. JSONB Validation
-
-Structured JSON should still be validated before rendering.
-
-Conceptually:
-
-```text
-JSON exists
-    ↓
-Expected array?
-    ↓
-Expected keys?
-    ↓
-Render
-```
-
-Malformed JSON content should not break the page.
-
----
-
-## 52. Input Sanitization
-
-The route originates from an HTTP request and should be treated as input.
-
-The plugin should:
-
-- Strip irrelevant query strings
-- Normalize path syntax
-- Encode query values
-- Avoid concatenating unsafe SQL
-- Use the API filter model safely
-
----
-
-## 53. Output Escaping
-
-Output should use WordPress escaping functions appropriate to the context.
-
-Examples:
-
-```php
-esc_html()
-esc_attr()
-esc_url()
-wp_kses_post()
-```
-
-The correct function depends on whether the field contains plain text, an attribute, a URL, or controlled HTML.
-
----
-
-## 54. Plain Text vs HTML Fields
-
-A strong data model explicitly knows whether a field is:
-
-```text
-Plain text
-Controlled rich text
-URL
-Structured JSON
-```
-
-This makes rendering safer.
-
----
-
-## 55. WordPress Hooks
-
-Depending on the implementation, the plugin can integrate with hooks such as:
-
-```text
-init
-wp
-template_redirect
-wp_head
-document_title_parts
-the_content
-shortcode hooks
-custom template helpers
-```
-
-The correct hook depends on when the data is needed.
-
----
-
-## 56. Title Hooking
-
-If the plugin controls the SEO title, it may integrate with WordPress title filters.
-
-Conceptually:
-
-```php
-add_filter('document_title_parts', function ($title) {
-    // Replace title using route-specific data.
-    return $title;
-});
-```
-
-The production implementation may integrate with a separate SEO plugin instead.
-
----
-
-## 57. Avoiding Repeated API Calls
-
-If several hooks request the same page record in one WordPress request, the plugin should avoid calling Supabase each time.
-
-A simple request-level cache can help.
-
-Conceptually:
-
-```php
-static $page_data = null;
-```
-
----
-
-## 58. Request-Level Memoization
-
-The flow becomes:
-
-```text
-First request for page data
-      ↓
-Fetch from cache/API
-      ↓
-Store in memory
-      ↓
-Later hook asks again
-      ↓
-Reuse same data
-```
-
-This reduces redundant work.
-
----
-
-## 59. REST Authentication
-
-Supabase access typically requires API headers.
-
-The key used by the public-facing application should have the minimum privileges required.
-
-Public website rendering should not require an unrestricted administrative key.
-
----
-
-## 60. Row-Level Security
-
-Supabase/PostgreSQL can use Row Level Security to control access.
-
-A public read-oriented content table can expose only approved records while keeping administrative or draft data protected.
-
-The exact production policy is private.
-
----
-
-## 61. Least Privilege
-
-The WordPress integration should only be able to:
-
-```text
-Read approved SEO/AEO page data
-```
-
-It should not require:
-
-```text
-Modify unrelated tables
-Delete data
-Administer database
-Access private customer information
-```
-
----
-
-## 62. Secret Rotation
-
-Separating credentials from source code makes key rotation easier.
-
-A key can be changed in configuration without rewriting plugin code or exposing the new value in Git history.
-
----
-
-## 63. Environment Separation
-
-Development and production should use separate configuration.
-
-Conceptually:
-
-```text
-Development WordPress
-      ↓
-Development Supabase
-
-Production WordPress
-      ↓
-Production Supabase
-```
-
-This reduces the risk of test activity affecting live content.
-
----
-
-## 64. Local Testing
-
-The plugin can be tested against:
-
-- Test routes
-- Synthetic page records
-- Development Supabase
-- Mock HTTP responses
-- WordPress staging
-
----
-
-## 65. API Mocking
-
-Unit tests can mock:
-
-```text
-Successful Supabase response
-Empty response
-HTTP 401
-HTTP 500
-Timeout
-Malformed JSON
-```
-
-This allows failure behavior to be tested without relying on a live API.
-
----
-
-## 66. Route Tests
-
-Important route cases include:
-
-```text
-/
-/national/example/
-/national/example
-/national/example/?test=1
-/NATIONAL/EXAMPLE/
-```
-
-All should normalize according to one consistent policy.
-
----
-
-## 67. Rendering Tests
-
-A rendering test can verify:
-
-```text
-SEO title appears correctly
-H1 appears correctly
-Optional content renders when present
-Missing optional content does not break page
-FAQ array renders expected number of items
-```
-
----
-
-## 68. Security Tests
-
-Tests can also verify:
-
-- HTML is escaped
-- URLs are validated
-- Credentials are not present in output
-- Unexpected path characters are handled
-- API errors do not expose private details
-
----
-
-## 69. Performance Testing
-
-Useful measurements include:
-
-```text
-Supabase response time
-WordPress total render time
-Cache hit rate
-Cache miss rate
-API calls per page request
-```
-
-These help identify bottlenecks.
-
----
-
-## 70. Search Engine Considerations
-
-The content is rendered server-side through WordPress.
-
-That means search crawlers receive the completed HTML response rather than relying entirely on client-side JavaScript to fetch core SEO content.
-
----
-
-## 71. Canonical Route Discipline
-
-A route-driven data model works best when the website has one canonical version of each page.
-
-Duplicate paths, unnecessary aliases, or inconsistent slash behavior can complicate both SEO and content lookup.
-
----
-
-## 72. Internal Linking
-
-A structured content system can later support route relationships such as:
-
-```text
-State page
-   ↓
-City pages
-   ↓
-Technology pages
-```
-
-This can be used to build consistent internal linking.
-
----
-
-## 73. Structured Data Generation
-
-Because content is stored in fields, structured data can be generated programmatically.
-
-Potential schema types can include:
-
-- FAQPage
-- Service
-- Organization-related markup
-- BreadcrumbList
-
-The exact schema strategy depends on the page.
-
----
-
-## 74. Avoiding Duplicate Schema
-
-If another WordPress SEO plugin already outputs structured data, the custom platform should avoid blindly generating conflicting duplicates.
-
-Integration needs to account for the rest of the WordPress stack.
-
----
-
-## 75. Content Quality Controls
-
-Useful automated checks can include:
-
-```text
-SEO title missing
-SEO title too long
-H1 missing
-Duplicate route
-Empty FAQ
-Missing technology
-Unpublished content on live route
-```
-
-The system can evolve toward stronger content QA over time.
-
----
-
-## 76. Database-Driven Auditing
-
-A database makes it easier to query content quality.
-
-Conceptually:
-
-```sql
-SELECT path
-FROM seo_pages
-WHERE seo_title IS NULL
-   OR h1 IS NULL;
-```
-
-This is far easier than manually opening hundreds of WordPress pages.
-
----
-
-## 77. Bulk Content Operations
-
-Structured records also make bulk updates possible.
-
-Examples:
-
-```text
-Update terminology
-Change technology labels
-Add required field
-Refresh FAQ structure
-Correct metadata pattern
-```
-
-This can be done through controlled database or admin workflows rather than individual page edits.
-
----
-
-## 78. Content Import
-
-A scalable content platform can support structured imports from:
-
-- CSV
-- Spreadsheet
-- Internal database
-- Data-generation workflow
-- Controlled AI-assisted workflow
-
-Imported content should still pass validation before publication.
-
----
-
-## 79. AI-Assisted Content
-
-The architecture can support AI-assisted content generation without making AI the live page renderer.
-
-A safer model is:
-
-```text
-Data / Market Context
-      ↓
-AI Draft
-      ↓
-Review / Validation
-      ↓
-Structured Database Record
-      ↓
-Published Page
-```
-
-This preserves human and system control over published content.
-
----
-
-## 80. AEO Feedback Loop
-
-Future optimization can connect:
-
-```text
-User Questions
-Search Queries
-AI Answer Visibility
-Page Performance
-        ↓
-Content Update
-```
-
-Because the content is structured, updates can target individual sections rather than entire page rewrites.
-
----
-
-## 81. Troubleshooting: No Data Returned
-
-When a page renders without expected SEO/AEO content, the troubleshooting sequence can be:
-
-```text
-Check current path
-      ↓
-Check normalized path
-      ↓
-Verify configuration
-      ↓
-Test Supabase connectivity
-      ↓
-Confirm record exists
-      ↓
-Inspect API response
-      ↓
-Check template access
-```
-
-This isolates the failure quickly.
-
----
-
-## 82. Troubleshooting: Connected but Not Rendering
-
-A successful API test does not prove the template is actually using the returned data.
-
-If the connection works but the page does not change, verify:
-
-- Plugin function is called
-- Correct hook/template is active
-- Page data is passed into rendering
-- Existing dynamic template is not overriding it
-- Cache is not serving old content
-
----
-
-## 83. Troubleshooting: Wrong Page Data
-
-If the wrong market content appears, investigate:
-
-```text
-Route normalization
-Duplicate path records
-Cache key
-Canonical route
-Query filters
-```
-
----
-
-## 84. Troubleshooting: Stale Data
-
-If Supabase contains updated content but WordPress shows old content:
-
-```text
-Check WordPress transient
-Check object cache
-Check CDN cache
-Check page cache
-Check browser cache
-```
-
-Several layers may cache the same rendered result.
-
----
-
-## 85. Troubleshooting: Intermittent Failures
-
-Intermittent issues can be caused by:
-
-- API latency
-- Short timeout
-- Hosting network problems
-- Rate limits
-- Caching inconsistency
-- temporary Supabase issues
-
-Logging response time and failure category helps distinguish these.
-
----
-
-## 86. Content and Code Deployment Separation
-
-The platform benefits from two independent workflows.
-
-```text
-Code change
-    → Plugin / Theme deployment
-
-Content change
-    → Supabase record update
-```
-
-Content editors do not need a code deployment for every SEO update.
-
----
-
-## 87. Migration Safety
-
-When code expects a new database field, deployment order matters.
-
-A safer sequence is:
-
-```text
-Add database field
-      ↓
-Backfill data
-      ↓
-Deploy compatible plugin/template
-      ↓
-Begin using new field
-```
-
-This reduces production errors.
-
----
-
-## 88. Feature Flags
-
-New behavior can be introduced behind configuration.
-
-Conceptually:
-
-```text
-ENABLE_NEW_FAQ_RENDERER=true
-```
-
-Feature flags can reduce risk when rolling out major template changes.
-
----
-
-## 89. Maintainability
-
-The system is easier to maintain when the plugin keeps clear boundaries:
-
-```text
-Configuration
-Route Logic
-API Client
-Data Validation
-Cache
-Rendering Helpers
-Logging
-```
-
-This makes debugging and future changes more predictable.
-
----
-
-## 90. Scalability
-
-Adding more localized pages should primarily mean adding more structured data.
-
-The architecture itself stays largely unchanged.
-
-```text
-More Markets
-      ↓
-More Records
-      ↓
-Same Plugin
-      ↓
-Same Template Architecture
-```
-
-This is the main scalability advantage.
-
 ---
-
-## 91. Database Scaling
-
-As the page count grows, important database concerns include:
 
-- Indexed route lookup
-- Unique path constraint
-- Small API response size
-- Published-content filtering
-- Efficient JSON fields
-- Query monitoring
+# 56. Key Technical Challenges Solved
 
----
+## Localized Content Without Template Duplication
 
-## 92. WordPress Scaling
+**Problem:** Local pages need unique metadata, FAQs, content, and technology context.
 
-On the WordPress side:
+**Approach:** Store local page context and search content as structured database records while keeping the WordPress template reusable.
 
-- Cache page data
-- Reuse API results within one request
-- Avoid expensive logic in repeated hooks
-- Keep API timeouts bounded
-- Fail gracefully
-
 ---
 
-## 93. CDN and Page Cache
+## Relational Data vs. Application-Friendly Data
 
-Because localized pages are mostly read-oriented, full-page caching can provide significant performance benefits.
+**Problem:** A normalized database is good for integrity, but WordPress should not make separate requests for every related table.
 
-The content API may only be called when a cached page expires or is invalidated.
+**Approach:** Use a PostgreSQL view with JSONB aggregation to deliver one page-oriented document.
 
 ---
-
-## 94. Content Freshness Strategy
 
-The system needs to decide how quickly a Supabase content change should appear publicly.
+## Automation Without Destroying Editorial Work
 
-Possible approaches:
+**Problem:** Generated defaults are useful, but manually optimized pages should not be overwritten.
 
-```text
-Immediate
-Near-real-time
-Within cache TTL
-Manual publish / purge
-```
+**Approach:** Use the `seo_locked` flag to preserve curated SEO fields.
 
-The right choice depends on business needs.
-
 ---
 
-## 95. Audit Fields
+## Different Technologies, Same Platform
 
-Useful record metadata can include:
+**Problem:** Fiber, coax, and mixed-technology markets need different content without separate template systems.
 
-```text
-created_at
-updated_at
-published_at
-updated_by
-content_version
-```
+**Approach:** Use the structured `technology` field as input to deterministic generation logic.
 
-These fields support operational visibility.
-
 ---
 
-## 96. Content Ownership
+## Structured FAQs for Both Humans and Machines
 
-A structured content system can also assign ownership or review responsibility to records.
+**Problem:** FAQ content can serve visible users and JSON-LD, but those use cases do not always need identical eligibility.
 
-This becomes helpful as the number of localized pages grows.
+**Approach:** Store independent `include_on_page` and `include_in_schema` controls.
 
 ---
-
-## 97. Public Showcase Boundaries
 
-This repository should demonstrate the system without exposing production implementation details.
+## External Content Source Without a Hard Failure
 
-Safe to show:
+**Problem:** A Supabase/API problem should not break a public WordPress page.
 
-- Conceptual PHP
-- Architecture
-- Data model examples
-- Route logic
-- Failure handling
-- Caching strategy
-- Security principles
-- Synthetic records
+**Approach:** Validate each response step and return to existing WordPress fallback values when necessary.
 
-Not safe to show:
-
-- Production API keys
-- Supabase service-role credentials
-- Internal market database
-- Exact private URLs
-- Proprietary page content
-- Full production schemas
-- Internal business rules
-
 ---
 
-## 98. Why This Is a Platform
-
-The project is more than a plugin because it combines:
-
-```text
-WordPress
-+
-PHP Integration
-+
-PostgreSQL Data Modeling
-+
-Supabase API
-+
-Route Resolution
-+
-Dynamic Templates
-+
-Structured SEO/AEO Content
-+
-Caching
-+
-Security
-+
-Operational Error Handling
-```
-
-The plugin is the connector; the platform is the full system.
+## Content Updates Without Code Deployments
 
----
+**Problem:** Search content changes more often than application architecture.
 
-## 99. End-to-End Technical Flow
-
-```mermaid
-sequenceDiagram
-    participant V as Visitor
-    participant W as WordPress
-    participant P as SEO/AEO Plugin
-    participant C as Cache
-    participant S as Supabase
-    participant D as PostgreSQL
-    participant T as Dynamic Template
-
-    V->>W: Request localized URL
-    W->>P: Request SEO/AEO page data
-    P->>P: Resolve and normalize path
-
-    P->>C: Check route cache
-
-    alt Cache Hit
-        C-->>P: Cached page record
-    else Cache Miss
-        P->>S: REST request by normalized path
-        S->>D: Query content record
-        D-->>S: Page data
-        S-->>P: JSON response
-        P->>P: Validate response
-        P->>C: Store valid result
-    end
-
-    P-->>T: Structured page data
-    T->>T: Escape and render fields
-    T-->>W: Localized page markup
-    W-->>V: Final HTML response
-```
+**Approach:** Keep content in PostgreSQL and rendering logic in PHP so they can evolve independently.
 
 ---
 
-## 100. Technical Challenges Solved
+# 57. Engineering Principles
 
-### Local Pages Needed Unique Content
-
-**Problem:** A reusable template still needs route-specific titles, headings, FAQs, and content.  
-**Solution:** Store route-specific records in Supabase and retrieve them by path.
-
-### Content Was Too Closely Coupled to WordPress
-
-**Problem:** Editing individual pages does not scale well.  
-**Solution:** Separate structured content from presentation.
-
-### The Site Already Used Dynamic Templates
-
-**Problem:** The new SEO system had to work with an existing dynamic page architecture.  
-**Solution:** Add SEO/AEO as a separate data layer instead of replacing the whole page system.
-
-### External Data Could Fail
-
-**Problem:** A network/API issue should not break a public website.  
-**Solution:** Use bounded timeouts, response validation, logging, caching, and safe fallbacks.
-
-### Many Pages Need Consistent Structure
-
-**Problem:** Manual page editing can create inconsistent metadata and headings.  
-**Solution:** Use a structured schema and reusable template.
-
-### Content Updates Should Not Require Code Changes
-
-**Problem:** Marketing content changes frequently.  
-**Solution:** Keep content in the database and code in the plugin/template layer.
-
----
+## Keep Structured Content Separate From Presentation
 
-## 101. Engineering Principles
+WordPress renders; PostgreSQL owns structured SEO/AEO data.
 
-### Keep Data Separate From Presentation
+## Model Relationships Explicitly
 
-The template renders content but does not own the market-specific data.
+Hierarchy, FAQs, keywords, sections, and internal links are structured relationships rather than conventions hidden inside page copy.
 
-### Normalize Before Querying
+## Generate Deterministically
 
-The URL path must be predictable before it is used as a lookup key.
+Default content generation uses known page context rather than uncontrolled runtime generation.
 
-### Fail Gracefully
+## Preserve Editorial Control
 
-An external API problem should not become a full-page outage.
+Automation must be able to stop at manually curated content.
 
-### Cache Repeated Reads
+## Deliver Application-Friendly Data
 
-Localized content changes much less often than it is read.
+The database can remain normalized while the consuming application receives one coherent document.
 
-### Escape at Render Time
+## Fail Gracefully
 
-Even trusted content should be handled according to its output context.
+A remote content lookup should not become a full-page outage.
 
-### Use Least Privilege
+## Use Least Privilege
 
-The public site needs read access, not administrative database control.
+The public rendering path should only have the access it needs.
 
-### Make Content Structured
+## Escape at Render Time
 
-Structured fields are easier to validate, render, reuse, and optimize.
+Database-managed content still requires context-aware output handling.
 
 ---
 
-## Public Documentation Scope
+# Public Documentation Scope
 
 This technical overview intentionally includes:
 
-- PHP plugin structure
 - WordPress request handling
 - Route normalization
-- Supabase REST requests
-- Response validation
-- PostgreSQL content modeling
-- Dynamic template integration
-- FAQ/JSON structures
-- Caching
-- Security
-- Error handling
+- Supabase REST retrieval
+- PostgreSQL relational modeling
+- Page hierarchy
+- PL/pgSQL content generation
+- `seo_locked` governance
+- Technology-aware generation
+- Structured keywords
+- Structured FAQs
+- Content sections
+- Internal links
+- PostgreSQL JSONB
+- Page-content view aggregation
+- API response validation
+- WordPress fallbacks
+- SEO metadata
+- Open Graph metadata
+- Robots directives
+- JSON-LD generation
+- Server-side rendering
+- Security boundaries
 - Testing
-- Performance
 - Troubleshooting
 - Scaling
 
 It intentionally excludes:
 
 - Production credentials
-- Production Supabase endpoints
-- Exact database schema
-- Proprietary SEO/AEO content
-- Internal market records
-- Production WordPress configuration
-- Private queries
-- Company-specific publishing rules
+- Real Supabase endpoints
+- Private database access
+- Real market data
+- Production pricing
+- Company-specific content
+- Internal operational workflows
+- Production caching configuration
+- Private integrations
+- Proprietary business rules
 
 ---
 
-## Summary
+# Summary
 
-The SEO & AEO Content Platform uses WordPress as the presentation layer and Supabase/PostgreSQL as a structured content layer.
+The SEO & AEO Content Platform turns localized search content into structured application data.
 
 ```text
-Localized URL
+Website Route
       ↓
-Route Normalization
+Structured Page Record
       ↓
-Custom WordPress Plugin
+PL/pgSQL Generation
       ↓
-Cache / Supabase REST API
+Relational SEO / AEO Content
       ↓
-Structured SEO/AEO Record
+PostgreSQL JSONB Aggregation
       ↓
-Response Validation
+Page Content View
       ↓
-Reusable Dynamic Template
+Supabase REST
       ↓
-Server-Rendered Localized Page
+WordPress PHP Client
+      ↓
+Reusable Template
+      ↓
+HTML + SEO Metadata + JSON-LD
 ```
 
-The system turns what would traditionally be a large collection of individually maintained WordPress pages into a route-driven content platform with reusable templates, centralized structured data, API-based retrieval, and controlled production behavior.
+The result is a system where marketing content strategy, database design, content automation, APIs, and WordPress rendering work together without requiring every localized page to become a separate hard-coded implementation.
